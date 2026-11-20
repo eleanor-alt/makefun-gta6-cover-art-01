@@ -1,40 +1,59 @@
-// A working gta6-cover-art-01 entry (Node 22, standard library only): the app is this directory's app/ folder, plain
-// static files a desktop browser loads offline (app/index.html and its ES modules, no library and no network
-// request), and the program hands it in. It copies app/ and screenshots/ from beside this file to /output and writes
-// /output/dossier.json, the summary the judge reads, with the vendored make.fun library. Only the plumbing, not the
-// cover art the bounty asks for: Cover Snap, a plain one-photo square cover with a sunset tint and a bold caption,
-// exported as a 1080 x 1080 PNG. Its two sample photos (app/samples/) were made for make.fun with an image model and
-// are free to use. Build your own GTA-style cover maker in its place, put your 3 or 4 PNG or JPEG screenshots in
-// screenshots/ (the first by name is the cover) and run it.
+// Vice Sunset Cover Studio — the hand-in program for gta6-cover-art-01.
+// Node 22, standard library only. It takes this repository's app/ (the
+// static cover maker: index.html, style.css and src/app.js, plus the two
+// sample photos under app/samples/) and screenshots/ and lays them out in
+// /output, then writes /output/dossier.json with the kit's buildDossier so
+// the judge can read the entry. Nothing here needs the network: the program
+// only copies files that are already in this repository, and it refuses to
+// write a dossier for an incomplete copy — the entrypoint and at least one
+// screenshot must be present, or the run fails loudly instead of handing
+// in a broken entry.
 //
-// Serve it locally with `node serve.ts`, then open http://localhost:8080.
-// Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
+// Outside the grader, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-app.ts';
 
-const here = fileURLToPath(new URL('.', import.meta.url));
-const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+const repoRoot = fileURLToPath(new URL('.', import.meta.url));
+const outputDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
-mkdirSync(out, { recursive: true });
-cpSync(join(here, 'app'), join(out, 'app'), { recursive: true });
-mkdirSync(join(out, 'screenshots'), { recursive: true });
-if (existsSync(join(here, 'screenshots'))) cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+// The files a valid entry cannot do without. Checked before anything is
+// copied, so a half-built checkout fails here instead of at the gate.
+const required = ['app/index.html', 'app/src/app.js', 'app/style.css'];
+for (const rel of required) {
+  if (!existsSync(join(repoRoot, rel))) throw new Error(`missing required file: ${rel}`);
+}
+const shotFiles = existsSync(join(repoRoot, 'screenshots'))
+  ? readdirSync(join(repoRoot, 'screenshots')).filter((f) => !f.startsWith('.'))
+  : [];
+if (shotFiles.length < 3 || shotFiles.length > 4) {
+  throw new Error(`expected 3 or 4 screenshots, found ${shotFiles.length}`);
+}
 
-// The scorer's own caps (reference/gate.json): only text_max_bytes shapes the bytes; the others refuse an entry the
-// scorer would refuse (more than 4 screenshots or one over 256 KiB; more than 993 files in app/ or 48 MiB of app
-// files, in all, or a path under app/ over 1000 bytes: app/ counts beside /output's own 1000-entry cap, its
-// screenshots/ and dossier.json).
+mkdirSync(outputDir, { recursive: true });
+cpSync(join(repoRoot, 'app'), join(outputDir, 'app'), { recursive: true });
+mkdirSync(join(outputDir, 'screenshots'), { recursive: true });
+cpSync(join(repoRoot, 'screenshots'), join(outputDir, 'screenshots'), { recursive: true });
+
+// The caps the gate enforces: at most 4 screenshots of 256 KiB each, app/
+// under 993 files and 48 MiB with no path over 1000 bytes, and the dossier
+// text capped at 160 KiB. The dossier is built from what was just copied,
+// so it always describes the exact files being handed in.
 writeFileSync(
-  join(out, 'dossier.json'),
-  buildDossier(out, {
+  join(outputDir, 'dossier.json'),
+  buildDossier(outputDir, {
     text_max_bytes: 163840,
     screenshots: { max: 4, max_bytes: 262144 },
     app_max_files: 993,
     app_max_bytes: 50331648,
     app_path_max_bytes: 1000,
   }),
+);
+
+const dossierBytes = statSync(join(outputDir, 'dossier.json')).size;
+console.log(
+  `handed in ${shotFiles.length} screenshots and dossier.json (${dossierBytes} bytes) to ${outputDir}`,
 );
